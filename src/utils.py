@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import holidays
 import json
 
 # Constantes globais
@@ -101,3 +102,28 @@ def carregar_mapeamentos(caminho):
     """Lê os dicionários de um arquivo JSON."""
     with open(caminho, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+def enriquecer_dados_temporais(df: pd.DataFrame, col_data: str = 'data_compra', dias_antecedencia: int = 5) -> pd.DataFrame:
+    df_temp = df.copy()
+
+    df_temp['ano'] = df_temp[col_data].dt.year.astype('int16')
+    df_temp['mes'] = df_temp[col_data].dt.month.astype('int8')
+    df_temp['dia'] = df_temp[col_data].dt.day.astype('int8')
+    df_temp['dia_semana'] = df_temp[col_data].dt.dayofweek.astype('int8') # 0=Segunda, 6=Domingo
+    df_temp['fim_de_semana'] = df_temp['dia_semana'].isin([5, 6]).astype('int8')
+
+    ano_min = df_temp['ano'].min()
+    ano_max = df_temp['ano'].max()
+    feriados_br = holidays.Brazil(years=range(ano_min, ano_max + 1))
+    feriados_set = set(feriados_br.keys())
+    
+    df_temp['e_feriado'] = df_temp[col_data].dt.date.isin(feriados_set).astype('int8')
+    datas_janela = set()
+    for data_feriado in feriados_set:
+        datas_range = pd.date_range(end=data_feriado, periods=dias_antecedencia + 1).date
+        datas_janela.update(datas_range)
+        
+    nome_coluna_delta = f'compra_ate_{dias_antecedencia}_dias_feriado'
+    df_temp[nome_coluna_delta] = df_temp[col_data].dt.date.isin(datas_janela).astype('int8')
+
+    return df_temp
