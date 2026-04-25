@@ -127,3 +127,47 @@ def enriquecer_dados_temporais(df: pd.DataFrame, col_data: str = 'data_compra', 
     df_temp[nome_coluna_delta] = df_temp[col_data].dt.date.isin(datas_janela).astype('int8')
 
     return df_temp
+
+def analisar_feriados_projeto(df_treino, data_corte, anos_historico=range(2013, 2025)):
+
+    feriados_br_dict = holidays.Brazil(years=anos_historico)
+
+    compras_feriados = df_treino[df_treino['e_feriado'] == 1].copy()
+
+    feriados_stats = (
+        compras_feriados
+        .groupby(compras_feriados['data_compra'].dt.date)
+        .agg(
+            gmv_total    = ('gmv_success', 'sum'),
+            num_compras  = ('gmv_success', 'count'),
+            tickets_total= ('quantidade_tickets', 'sum')
+        )
+        .reset_index()
+    )
+
+    feriados_stats['nome_feriado'] = feriados_stats['data_compra'].map(feriados_br_dict)
+
+    # Remove datas que não mapearam para nenhum feriado (edge case de feriados estaduais)
+    feriados_stats = feriados_stats.dropna(subset=['nome_feriado'])
+
+    top_feriados = (
+        feriados_stats
+        .groupby('nome_feriado')
+        .agg(
+            gmv_medio_anual      = ('gmv_total', 'mean'),
+            compras_medias_anual = ('num_compras', 'mean'),
+            tickets_medios_anual = ('tickets_total', 'mean'),
+            anos_ocorreu         = ('data_compra', 'count')
+        )
+        .round(2)
+        .sort_values('gmv_medio_anual', ascending=False)
+    )
+
+    # sorted() é O(n log n) sobre lista pequena de feriados — ok
+    feriados_lista = sorted(feriados_br_dict.keys())
+    data_ref = pd.to_datetime(data_corte).date()
+
+    proximo_feriado  = next((f for f in feriados_lista if f > data_ref), None)
+    dias_ate_feriado = (proximo_feriado - data_ref).days if proximo_feriado else 999
+
+    return top_feriados, proximo_feriado, dias_ate_feriado
