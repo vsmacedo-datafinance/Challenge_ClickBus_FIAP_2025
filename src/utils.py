@@ -2,6 +2,13 @@ import pandas as pd
 import numpy as np
 import holidays
 import json
+import time
+
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.metrics import (
+    roc_auc_score, average_precision_score,
+    f1_score, precision_score, recall_score,
+)
 
 # Constantes globais
 INICIO_COVID = pd.Timestamp('2020-03-11')
@@ -171,3 +178,191 @@ def analisar_feriados_projeto(df_treino, data_corte, anos_historico=range(2013, 
     dias_ate_feriado = (proximo_feriado - data_ref).days if proximo_feriado else 999
 
     return top_feriados, proximo_feriado, dias_ate_feriado
+
+
+# MODELO — Timing é Tudo
+
+def enriquecer_features_modelo2(
+    df_cliente: pd.DataFrame,
+    df_treino: pd.DataFrame,
+    col_id: str = 'id_cliente',
+) -> pd.DataFrame:
+    # 1. sazonalidade_score
+    MESES_ALTA = [1, 7, 12]
+    df_treino = df_treino.copy()
+    df_treino['compra_mes_alta'] = df_treino['mes'].isin(MESES_ALTA).astype(int)
+ 
+    sazon = (
+        df_treino
+        .groupby(col_id)
+        .agg(compras_alta=('compra_mes_alta', 'sum'), total=('gmv_success', 'count'))
+        .assign(sazonalidade_score=lambda x: x['compras_alta'] / x['total'])
+        .reset_index()[[col_id, 'sazonalidade_score']]
+    )
+ 
+    # 2. prop_ferias
+    MESES_FERIAS = [1, 7, 11, 12]
+    df_treino['mes_ferias'] = df_treino['mes'].isin(MESES_FERIAS).astype(int)
+ 
+    ferias = (
+        df_treino
+        .groupby(col_id)
+        .agg(compras_ferias=('mes_ferias', 'sum'), total_f=('gmv_success', 'count'))
+        .assign(prop_ferias=lambda x: x['compras_ferias'] / x['total_f'])
+        .reset_index()[[col_id, 'prop_ferias']]
+    )
+ 
+    # 3. mes_ultima_compra
+    mes_ult = (
+        df_treino
+        .groupby(col_id)['data_compra']
+        .max()
+        .dt.month
+        .reset_index()
+        .rename(columns={'data_compra': 'mes_ultima_compra'})
+    )
+ 
+    # 4. intervalo_medio_dias
+    # .diff() dentro de cada grupo calcula dias entre compras consecutivas.
+    # A média desses intervalos é o ritmo de compra do cliente.
+    # Clientes com 1 compra têm NaN (sem diferença calculável) → preenchido com 9999.
+    intervalo = (
+        df_treino
+        .sort_values([col_id, 'data_compra'])
+        .assign(dias_prev=lambda x:
+            x.groupby(col_id)['data_compra'].diff().dt.days
+        )
+        .groupby(col_id)['dias_prev']
+        .mean()
+        .fillna(9999)
+        .reset_index()
+        .rename(columns={'dias_prev': 'intervalo_medio_dias'})
+    )
+ 
+    # 5. dias_ate_proximo_feriado — constante para todos os clientes
+    _, _, dias_ate_feriado = analisar_feriados_projeto(
+        df_treino, data_corte=df_treino['data_compra'].max()
+    )
+ 
+    # Merge sequencial — left join preserva todos os clientes
+    df_out = (
+        df_cliente
+        .merge(sazon,    on=col_id, how='left')
+        .merge(ferias,   on=col_id, how='left')
+        .merge(mes_ult,  on=col_id, how='left')
+        .merge(intervalo, on=col_id, how='left')
+    )
+ 
+    df_out['dias_ate_proximo_feriado'] = dias_ate_feriado
+ 
+    df_out['intervalo_medio_dias']  = df_out['intervalo_medio_dias'].fillna(9999)
+    df_out['sazonalidade_score']    = df_out['sazonalidade_score'].fillna(0)
+    df_out['prop_ferias']           = df_out['prop_ferias'].fillna(0)
+ 
+    print(f"df_cliente shape após enriquecimento: {df_out.shape}")
+    print(f"Novas features: sazonalidade_score, prop_ferias, mes_ultima_compra, "
+          f"intervalo_medio_dias, dias_ate_proximo_feriado")
+ 
+    return df_out
+
+def construir_target_30d(
+    df_cliente_clust: pd.DataFrame,
+    df_val: pd.DataFrame,
+    data_ref: pd.Timestamp,
+    janela_dias: int = 30,
+    col_data: str = 'data_compra',
+    col_id: str = 'id_cliente',
+) -> pd.DataFrame:
+    data_limite = data_ref + pd.Timedelta(days=janela_dias)
+
+    compradores = set(
+        df_val
+        .loc[df_val[col_data] <= data_limite, col_id]
+        .unique()
+    )
+
+    df_out = df_cliente_clust.copy()
+    df_out['target'] = df_out[col_id].isin(compradores).astype(int)
+
+    n_total = len(df_out)
+    n_pos   = df_out['target'].sum()
+
+    print(f"data_ref    : {data_ref.date()}")
+    print(f"data_limite : {data_limite.date()} (+{janela_dias}d)")
+    print(f"Compradores na janela : {len(compradores):,}")
+    print(f"Target = 1  : {n_pos:,} ({n_pos/n_total:.1%})")
+    print(f"Target = 0  : {n_total-n_pos:,} ({(n_total-n_pos)/n_total:.1%})")
+    print(f"Ratio       : 1 : {int((n_total-n_pos)/n_pos)}")
+
+    return df_out
+
+def preparar_features(
+    df_modelo: pd.DataFrame,
+    cols_excluir: list,
+    col_target: str = 'target',
+    col_cluster: str = 'cluster',
+):
+    df_enc = pd.get_dummies(
+        df_modelo,
+        columns=[col_cluster],
+        prefix=col_cluster,
+        drop_first=False,
+    )
+
+    cols_remover = [c for c in cols_excluir + [col_target] if c in df_enc.columns]
+    features = [c for c in df_enc.columns if c not in cols_remover]
+
+    X = df_enc[features]
+    y = df_enc[col_target]
+
+    assert X.isnull().sum().sum() == 0, "Nulos encontrados nas features!"
+
+    print(f"Features : {X.shape[1]}")
+    print(f"Amostras : {X.shape[0]:,}")
+    print(f"Positivos: {y.sum():,} ({y.mean():.1%})")
+
+    return X, y
+
+
+def avaliar_estrategias(
+    experimentos: dict,
+    X_train, y_train,
+    X_eval, y_eval,
+    param_grid: dict,
+    cv,
+    random_state: int = 42,
+    n_iter: int = 10,
+) -> dict:
+    resultados = {}
+
+    for nome, pipe in experimentos.items():
+        print(f"Treinando {nome}...", end=' ')
+        inicio = time.time()
+
+        search = RandomizedSearchCV(
+            pipe, param_grid,
+            n_iter=n_iter,
+            scoring='average_precision',
+            cv=cv,
+            random_state=random_state,
+            n_jobs=-1,
+        )
+        search.fit(X_train, y_train)
+
+        y_prob = search.best_estimator_.predict_proba(X_eval)[:, 1]
+        y_pred = search.best_estimator_.predict(X_eval)
+
+        resultados[nome] = {
+            'modelo'   : search.best_estimator_,
+            'y_prob'   : y_prob,
+            'y_pred'   : y_pred,
+            'auc_roc'  : roc_auc_score(y_eval, y_prob),
+            'auc_pr'   : average_precision_score(y_eval, y_prob),
+            'f1'       : f1_score(y_eval, y_pred),
+            'recall'   : recall_score(y_eval, y_pred),
+            'precision': precision_score(y_eval, y_pred, zero_division=0),
+        }
+
+        print(f"{time.time()-inicio:.0f}s | AUC-PR: {resultados[nome]['auc_pr']:.4f}")
+
+    return resultados
