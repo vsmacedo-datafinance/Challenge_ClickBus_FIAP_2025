@@ -8,8 +8,7 @@ notebooks = [
     "Data_Trip_ClickBus_Camada_Ouro_Próximo_Trecho.ipynb",
     "Data_Trip_ClickBus_Camada_Ouro_Timing_é_tudo.ipynb",
     "Data_Trip_ClickBus_Camada_Ouro_Segmentação.ipynb",
-    "Data_Trip_Modelo_final_ClickBus.ipynb"
-    
+    "Data_Trip_Modelo_final_ClickBus.ipynb",
 ]
 
 for nome in notebooks:
@@ -17,12 +16,19 @@ for nome in notebooks:
         nb = json.load(f)
 
     for cell in nb["cells"]:
-        cell["outputs"] = []
+        cell["outputs"] = [] if "outputs" in cell else cell.get("outputs", [])
         cell["execution_count"] = None
-        cell.pop("id", None)
+        # preserva metadata da célula mas remove widget state
+        cell_meta = cell.get("metadata", {})
+        cell_meta.pop("widgets", None)
+        cell["metadata"] = cell_meta
 
-    nb.get("metadata", {}).pop("widgets", None)
-    nb.get("metadata", {}).pop("accelerator", None)
+    # remove só widgets e colab do metadata global, preserva nbformat
+    nb_meta = nb.get("metadata", {})
+    nb_meta.pop("widgets", None)
+    nb_meta.pop("colab", None)
+    nb_meta.pop("accelerator", None)
+    nb["metadata"] = nb_meta
 
     with open(nome, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1, ensure_ascii=False)
