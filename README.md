@@ -154,7 +154,7 @@ Portifólio DS Vini/Challenge_ClickBus_2025/data/
 ## Autor
 
 **Vinicius de Sousa Macedo**  
-Especialista em Investimentos e Criptomoedas — Nubank  
+Quality Analyst | CX & tNPS — Nubank  
 Tecnólogo em Data Science (FIAP) · Bacharel em Ciências Econômicas (ESEG)
 
 - LinkedIn: https://linkedin.com/in/vsmacedo
