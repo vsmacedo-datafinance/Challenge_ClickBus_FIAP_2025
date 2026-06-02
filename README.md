@@ -59,6 +59,13 @@ Challenge_ClickBus_FIAP_2025/
 │   ├── Data_Trip_ClickBus_Camada_Ouro_Próximo_Trecho.ipynb # LightGBM (próximo trecho)
 │   └── Data_Trip_Modelo_final_ClickBus.ipynb            # [V1 ORIGINAL — referência histórica]
 │
+├── imagens/
+│   ├── demanda_real_x_inflacao.png
+│   ├── gmv_dia_e_mes.png
+│   ├── projecao_pca_clusterizao.png
+│   ├── calibracao_threshold.png
+│   └── avaliacao_modelo_final_weight.png
+│
 └── README.md
 ```
 
@@ -74,6 +81,14 @@ Decodifica hashes anonimizados de cidades, empresas e clientes. Remove registros
 
 **Ouro — EDA e Feature Engineering**
 Análise exploratória restrita a `df_treino`. Cobre sazonalidade de GMV, concentração de rotas (Pareto 80/20), série histórica com quebra estrutural COVID marcada e market share de operadoras. Constrói `df_cliente` com RFM estendido, aplica VIF e correlação Spearman para eliminar redundâncias, e transforma variáveis assimétricas com `log1p`.
+
+O gráfico abaixo mostra a evolução do faturamento mensal com destaque para o choque exógeno da pandemia — tratado como quebra estrutural, não como ruído:
+
+![Demanda Real e Efeito Inflação](imagens/demanda_real_x_inflacao.png)
+
+Sazonalidade por mês e por dia da semana — base para as features de comportamento temporal do `df_cliente`:
+
+![GMV por Dia e Mês](imagens/gmv_dia_e_mes.png)
 
 **Segmentação — K-Means (k = 5)**
 K escolhido por Elbow, Silhouette Score e interpretabilidade das personas. Visualizações incluem PCA 2D, radar chart do DNA econômico por cluster e análise de estabilidade por período COVID.
@@ -98,9 +113,21 @@ Prevê o próximo par origem-destino de clientes recorrentes. `ultimo_trecho` (�
 | 3 | One-shot de Feriado | Compra única concentrada em feriados | Campanha sazonal 30–45 dias antes de feriados |
 | 4 | One-shot Regular | Compra única fora de feriado | Reativação — incentivo à segunda viagem |
 
+Projeção PCA dos 5 clusters sobre 99% da base — os grupos apresentam separação clara no espaço de Volume/LTV vs. Comportamento/Tempo:
+
+![Projeção PCA dos Clusters](imagens/projecao_pca_clusterizao.png)
+
 ### Propensão de Recompra (XGBoost)
 
 Com ratio de desbalanceamento de 24,6:1, o baseline aleatório teria AUC-PR de ~0,04. A estratégia vencedora (`scale_pos_weight`) calibrada ao threshold de 79% atingiu precisão de 27,34% — quase 6x a taxa natural de conversão da base. Os principais drivers identificados pelo SHAP foram recência e ritmo de compra (`intervalo_medio_dias`), alinhados com a teoria de Customer Lifetime Value.
+
+Calibração do threshold por máximo F1 — o ponto ótimo em 0,79 equilibra precisão e recall para o custo de campanha esperado:
+
+![Calibração de Threshold](imagens/calibracao_threshold.png)
+
+Avaliação final do modelo: Matriz de Confusão, Curva ROC (AUC = 0,84) e Curva Precision-Recall (AP = 0,27 vs. baseline 0,039):
+
+![Avaliação do Modelo Final](imagens/avaliacao_modelo_final_weight.png)
 
 ### Próximo Trecho (LightGBM)
 
@@ -153,11 +180,11 @@ Portifólio DS Vini/Challenge_ClickBus_2025/data/
 
 ## Autor
 
-**Vinicius de Sousa Macedo**  
-Quality Analyst | CX & tNPS — Nubank  
+**Vinicius de Sousa Macedo**
+Quality Analyst | CX & tNPS — Nubank
 Tecnólogo em Data Science (FIAP) · Bacharel em Ciências Econômicas (ESEG)
 
-- LinkedIn: https://linkedin.com/in/vsmacedo
+- LinkedIn: https://linkedin.com/in/vsmacedo-datafinance
 - GitHub: https://github.com/vsmacedo-datafinance
 
 ---
