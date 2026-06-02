@@ -16,14 +16,10 @@ for nome in notebooks:
         nb = json.load(f)
 
     for cell in nb["cells"]:
-        cell["outputs"] = [] if "outputs" in cell else cell.get("outputs", [])
-        cell["execution_count"] = None
-        # preserva metadata da célula mas remove widget state
-        cell_meta = cell.get("metadata", {})
-        cell_meta.pop("widgets", None)
-        cell["metadata"] = cell_meta
+        if cell["cell_type"] == "code":  # só células de código!
+            cell["outputs"] = []
+            cell["execution_count"] = None
 
-    # remove só widgets e colab do metadata global, preserva nbformat
     nb_meta = nb.get("metadata", {})
     nb_meta.pop("widgets", None)
     nb_meta.pop("colab", None)
